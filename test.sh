@@ -25,4 +25,5 @@ torchrun --nproc_per_node="${NUM_GPUS}" --master_port="${MASTER_PORT}" ft_infere
   --merge_size "${MERGE_SIZE}" \
   --segment_size "${SEGMENT_SIZE}" \
   --per_device_eval_batch_size "${PER_DEVICE_EVAL_BATCH_SIZE}" \
-  --num_samples "${NUM_SAMPLES}"
+  --num_samples "${NUM_SAMPLES}" \
+  "$@"

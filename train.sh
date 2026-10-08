@@ -33,6 +33,7 @@ torchrun --nproc_per_node="${NUM_GPUS}" --master_port="${MASTER_PORT}" instructi
   --eval_steps "${EVAL_STEPS}" \
   --per_device_train_batch_size "${PER_DEVICE_TRAIN_BATCH_SIZE}" \
   --per_device_eval_batch_size "${PER_DEVICE_EVAL_BATCH_SIZE}" \
-  --debug_data True
+  --debug_data True \
+  "$@"
   # --deepspeed ds_config.json \
 

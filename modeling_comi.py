@@ -40,6 +40,8 @@ def build_lora_config(model_args, target_modules: str = None):
 @dataclass
 class ModelArguments:
     model_name_or_path: str = field(default="meta-llama/Llama-3.2-1B-Instruct")
+    dqn_checkpoint: str = field(default="", metadata={"help": "DQNMergeController checkpoint; empty disables DQN"})
+    dqn_explore: bool = field(default=False, metadata={"help": "enable epsilon-greedy DQN actions; does not train DQN"})
     merge_size: int = field(default=16, metadata={"help": "tokens per memory slot (COMI-style pooling)"})
     merge_sizes: str = field(default="16,32", metadata={"help": "candidate merge sizes for random sampling, comma separated"})
     is_random: bool = field(default=False, metadata={"help": "if true, sample merge size from merge_sizes for each batch"})
@@ -326,6 +328,13 @@ class COMI(torch.nn.Module):
         self.merge_size = model_args.compress_ratio if model_args.compress_ratio > 0 else model_args.merge_size
         self.merge_sizes = [int(x.strip()) for x in model_args.merge_sizes.split(",") if x.strip()]
         self.is_random = model_args.is_random
+        self.dqn_controller = None
+        self.last_dqn_decisions = []
+        if model_args.dqn_checkpoint:
+            from dqn_controller import DQNMergeController
+            self.dqn_controller = DQNMergeController.from_checkpoint(
+                model_args.dqn_checkpoint, device="cpu", explore=model_args.dqn_explore,
+            )
         self.segment_size = model_args.segment_size
         self.use_transform_layer = model_args.use_transform_layer
         self.coarse_grained_on = model_args.coarse_grained_on
@@ -480,6 +489,11 @@ class COMI(torch.nn.Module):
             base_embeds = self.encoder.model.embed_tokens(token_ids)
         return base_embeds
 
+    def set_dqn_controller(self, controller=None):
+        """Attach a DQNMergeController, or pass None to restore normal behavior."""
+        self.dqn_controller = controller
+        self.last_dqn_decisions = []
+
     def generate_merge_size(self):
         if not self.merge_sizes:
             return self.merge_size
@@ -506,9 +520,10 @@ class COMI(torch.nn.Module):
         merge_size,
         query_ids,
         query_input_mask,
+        segment_index=0,
     ):
         device = input_ids.device
-        if self.is_random:
+        if self.is_random and self.dqn_controller is None:
             merge_size = self.generate_merge_size()
 
         all_input_ids = torch.cat((input_ids, query_ids), dim=1)
@@ -538,11 +553,25 @@ class COMI(torch.nn.Module):
             if select_query_hidden_state.shape[0] == 0:
                 select_query_hidden_state = select_context_hidden_state
             query_embeds = torch.mean(select_query_hidden_state, dim=0)
+            selected_merge_size = merge_size
+            decision = None
+            if self.dqn_controller is not None and context_mask.bool().any():
+                selected_merge_size, decision = self.dqn_controller.choose(
+                    select_context_hidden_state, query_embeds,
+                )
             memory_embeds = self.tkdr.compress_by_mrmr(
                 select_context_hidden_state,
                 query_embeds,
-                merge_size,
+                selected_merge_size,
             )
+            if decision is not None:
+                decision.update(
+                    batch_index=i, segment_index=segment_index,
+                    merge_size=selected_merge_size,
+                    input_tokens=select_context_hidden_state.shape[0],
+                    memory_tokens=memory_embeds.shape[0],
+                )
+                self.last_dqn_decisions.append(decision)
             memorys_list.append(memory_embeds.unsqueeze(0))
             memory_lengths.append(memory_embeds.shape[0])
 
@@ -580,16 +609,18 @@ class COMI(torch.nn.Module):
         return aligned_memorys, att_mask
 
     def build_comi_memory(self, input_ids, attention_mask, query_ids, query_attention_mask):
+        self.last_dqn_decisions = []
         segments, segment_masks = self.split_to_segments(input_ids, attention_mask)
         all_memory = []
         all_masks = []
-        for seg_ids, seg_mask in zip(segments, segment_masks):
+        for segment_index, (seg_ids, seg_mask) in enumerate(zip(segments, segment_masks)):
             seg_memory, seg_memory_mask = self.generate_tkdr_memorys(
                 input_ids=seg_ids,
                 input_mask=seg_mask,
                 merge_size=self.merge_size,
                 query_ids=query_ids,
                 query_input_mask=query_attention_mask,
+                segment_index=segment_index,
             )
             all_memory.append(seg_memory)
             all_masks.append(seg_memory_mask)
