@@ -75,6 +75,9 @@ The current implementation uses an encoder-decoder architecture built from the s
 
 ## Environment Setup
 
+For L40, use the foreground script [runpod_training.py](runpod_training.py)
+and follow [L40.md](L40.md). Training logs are printed directly in the terminal.
+
 For the prepared HotpotQA training workflow on RunPod, use [RUNPOD.md](RUNPOD.md)
 and `scripts/runpod_setup.sh`. That workflow pins a separate compatible stack,
 includes data conversion, smoke testing, checkpoint resume, and evaluation.

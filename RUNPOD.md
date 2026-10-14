@@ -1,11 +1,14 @@
 # Train COMI on HotpotQA using RunPod
 
+For L40 and the foreground script workflow, follow [L40.md](L40.md) and run
+`python3 runpod_training.py --help`. Training logs are shown directly in the terminal.
+
 Backbone: `Qwen/Qwen3-4B-Instruct-2507`. Encoder: first 8 layers,
 memory fusion: 1 layer, decoder: full backbone with LoRA (rank 128).
 Encoder and fusion are fully trained. Compression is about 16x by default.
 COMI produces embedding memories consumed by its own decoder, not compressed text.
 
-For a notebook workflow, upload `runpod_training.ipynb` and `comi-runpod.zip`
+For the older Blackwell notebook workflow, upload `runpod_training_B300.ipynb` and `comi-runpod.zip`
 to `/workspace`, open the notebook in JupyterLab, and execute cells in order.
 It installs an isolated training venv, verifies data, runs smoke tests, starts
 full training in the background, and provides monitoring/evaluation cells.
@@ -37,7 +40,7 @@ export HF_HOME=/workspace/hf-cache
 
 The setup installs PyTorch 2.8.0/cu129 and the pinned requirements in an isolated
 venv. Do not reuse the original README's older mixed dependency stack.
-The exact installed dependency versions are written to `/workspace/comi-environment.txt`.
+The exact installed dependency versions are written to `environment.txt` inside the training venv.
 Local validation details are in [VALIDATION.md](VALIDATION.md).
 
 ## 2. Data
@@ -127,11 +130,10 @@ NUM_GPUS=2 bash scripts/runpod_train.sh --deepspeed ds_config.json
 ```
 
 For long jobs use your Pod's terminal multiplexer, for example `tmux new -s comi`,
-then run the command inside it. Keep logs outside the checkpoint output directory:
+then run the command inside it. Logs are displayed directly in the terminal:
 
 ```bash
-mkdir -p /workspace/comi-logs
-bash scripts/runpod_train.sh 2>&1 | tee /workspace/comi-logs/train.log
+bash scripts/runpod_train.sh
 ```
 
 ## 5. Resume and evaluation

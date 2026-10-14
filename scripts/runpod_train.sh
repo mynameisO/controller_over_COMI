@@ -4,6 +4,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export HF_HOME="${HF_HOME:-/workspace/hf-cache}"
 export HF_HUB_ENABLE_HF_TRANSFER=0
 export TOKENIZERS_PARALLELISM=false
+export PYTHONUNBUFFERED=1
 export DATA_DIR="${DATA_DIR:-/workspace/comi-data/hotpotqa}"
 export NUM_GPUS="${NUM_GPUS:-1}"
 export MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-Instruct-2507}"
@@ -21,4 +22,4 @@ if [[ "${1:-}" == "smoke" ]]; then
   export GRADIENT_ACCUMULATION_STEPS=1
 fi
 python scripts/preflight.py --train-file "$TRAIN_FILE" --eval-file "$TEST_FILE" --num-gpus "$NUM_GPUS" --output-dir "$OUTPUT_DIR"
-bash train.sh "$@"
+exec bash train.sh "$@"

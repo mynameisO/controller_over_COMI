@@ -100,6 +100,13 @@ class CustomTrainer(Trainer):
                 seen_data_ptrs[ptr] = k
                 deduped[k] = v
         safetensors.torch.save_file(deduped, os.path.join(output_dir, "model.safetensors"))
+        if torch.cuda.is_available():
+            print(
+                "CUDA memory peaks (GiB): "
+                f"allocated={torch.cuda.max_memory_allocated() / 2**30:.2f}, "
+                f"reserved={torch.cuda.max_memory_reserved() / 2**30:.2f}",
+                flush=True,
+            )
         if hasattr(self.model, "config"):
             self.model.config.save_pretrained(output_dir)
         model = self.accelerator.unwrap_model(self.model)

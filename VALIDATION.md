@@ -35,3 +35,12 @@ this wheel stack. The four existing CPU regression cases still pass on the local
 PyTorch 2.6.0 CPU environment; CUDA 12.9 and the user's Blackwell device require
 validation on the Pod. The original setup's CUDA 12.4 wheel was incompatible with
 the sm_120 GPU shown in the user's log.
+
+## L40 foreground script
+
+`runpod_training.py` replaces `runpod_training.ipynb` and selects PyTorch
+2.6.0/cu124 in an isolated L40 venv. Setup, data preparation, preflight, smoke,
+training, resume, and evaluation run with inherited terminal stdout/stderr.
+There is no background training process or separate training log file.
+The original model training strategy is preserved; context segments remain
+4,096 tokens. L40 CUDA/VRAM validation must be performed on the actual Pod.
