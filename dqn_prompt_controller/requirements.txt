@@ -1,0 +1,4 @@
+numpy>=1.26
+torch>=2.2
+transformers>=4.45
+# run_dqn_over_comi.py ใช้ dependency ของ COMI (peft, safetensors) ด้วย
