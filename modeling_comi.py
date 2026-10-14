@@ -39,7 +39,8 @@ def build_lora_config(model_args, target_modules: str = None):
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: str = field(default="meta-llama/Llama-3.2-1B-Instruct")
+    model_name_or_path: str = field(default="Qwen/Qwen3-4B-Instruct-2507")
+    max_new_tokens: int = field(default=128)
     merge_size: int = field(default=16, metadata={"help": "tokens per memory slot (COMI-style pooling)"})
     merge_sizes: str = field(default="16,32", metadata={"help": "candidate merge sizes for random sampling, comma separated"})
     is_random: bool = field(default=False, metadata={"help": "if true, sample merge size from merge_sizes for each batch"})
@@ -88,7 +89,7 @@ class TrainingArguments(TrainingArguments):
         default=28000,
         metadata={"help": "Maximum sequence length."},
     )
-    report_to: Optional[str] = field(default="wandb")
+    report_to: Optional[str] = field(default="none")
     project_name: Optional[str] = field(default="cluster")
     max_steps: int = field(default=10000, metadata={"help": "max steps of training"})
     save_strategy: Optional[str] = field(default="steps")
@@ -98,7 +99,7 @@ class TrainingArguments(TrainingArguments):
     num_train_epochs: int = field(default=1)
     add_special_token_for_lm: bool = field(default=False)
     restore_from: str = field(default="", metadata={"help": "checkpoint to restore from"})
-    overwrite_output_dir: bool = field(default=True)
+    overwrite_output_dir: bool = field(default=False)
     logging_steps: int = field(default=100)
     deepspeed: str = field(default="")
     bf16: bool = field(default=True, metadata={"help": "Use bfloat16"})
@@ -299,21 +300,28 @@ class COMI(torch.nn.Module):
         self.training_args = training_args
         self.lora_config = lora_config
         self.model_name = model_args.model_name_or_path
+        if min(model_args.merge_size, model_args.segment_size, model_args.encoder_layers,
+               model_args.num_mem_fusion_layers, model_args.max_new_tokens) <= 0:
+            raise ValueError("Merge size, segment size, layer counts and max_new_tokens must be positive")
+        model_dtype = torch.bfloat16 if training_args.bf16 else (
+            torch.float16 if training_args.fp16 else torch.float32
+        )
+        attention_impl = "flash_attention_2" if model_args.use_flash_attention_2 else "sdpa"
         encoder_config = AutoConfig.from_pretrained(self.model_name)
         encoder_config.num_hidden_layers = model_args.encoder_layers
         self.encoder = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             config=encoder_config,
-            torch_dtype=torch.bfloat16 if training_args.bf16 else torch.float16,
-            # use_flash_attention_2=model_args.use_flash_attention_2,
+            torch_dtype=model_dtype,
+            attn_implementation=attention_impl,
             # resume_download=True,
             trust_remote_code=True
         )
         self.training_mode = model_args.train
         self.decoder = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            torch_dtype=torch.bfloat16 if training_args.bf16 else torch.float16,
-            # use_flash_attention_2=model_args.use_flash_attention_2,
+            torch_dtype=model_dtype,
+            attn_implementation=attention_impl,
             # resume_download=True,
             trust_remote_code=True
         )
@@ -335,7 +343,7 @@ class COMI(torch.nn.Module):
 
         decoder_hidden_size = self.decoder.config.hidden_size
         self.semantic_alignment_layer = nn.Linear(self.dim, decoder_hidden_size).to(
-            dtype=torch.bfloat16 if training_args.bf16 else torch.float16
+            dtype=model_dtype
         )
         if self.use_transform_layer:
             fusion_config = AutoConfig.from_pretrained(self.model_name)
@@ -343,8 +351,8 @@ class COMI(torch.nn.Module):
             self.memory_fusion_layer = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 config=fusion_config,
-                torch_dtype=torch.bfloat16 if training_args.bf16 else torch.float16,
-                # use_flash_attention_2=model_args.use_flash_attention_2,
+                torch_dtype=model_dtype,
+                attn_implementation=attention_impl,
                 # resume_download=True,
                 trust_remote_code=True,
             )
@@ -382,6 +390,11 @@ class COMI(torch.nn.Module):
             redun_fine=self.redun_fine,
         )
         self._configure_trainability()
+        if self.training_mode:
+            self.encoder.config.use_cache = False
+            self.decoder.config.use_cache = False
+            if self.use_transform_layer:
+                self.memory_fusion_layer.config.use_cache = False
 
         if self.training_mode:
             self.init()
@@ -480,6 +493,13 @@ class COMI(torch.nn.Module):
             base_embeds = self.encoder.model.embed_tokens(token_ids)
         return base_embeds
 
+    @staticmethod
+    def backbone_hidden_states(module, **kwargs):
+        # Adapters live inside the backbone too. Skip the unused causal LM head
+        # and avoid retaining every layer's activations in a hidden-state tuple.
+        base = module.get_base_model() if hasattr(module, "get_base_model") else module
+        return base.model(**kwargs, return_dict=True, use_cache=False).last_hidden_state
+
     def generate_merge_size(self):
         if not self.merge_sizes:
             return self.merge_size
@@ -515,12 +535,10 @@ class COMI(torch.nn.Module):
         all_input_mask = torch.cat((input_mask, query_input_mask), dim=1)
 
         encoder_embeds = self.tokens_to_embeddings(all_input_ids)
-        last_hidden_state = self.encoder(
+        last_hidden_state = self.backbone_hidden_states(self.encoder,
             inputs_embeds=encoder_embeds,
             attention_mask=all_input_mask,
-            output_hidden_states=True,
-            return_dict=True,
-        ).hidden_states[-1]
+        )
         batch_size = input_ids.shape[0]
         context_len = input_ids.shape[1]
         query_len = query_ids.shape[1]
@@ -564,12 +582,10 @@ class COMI(torch.nn.Module):
         att_mask = att_mask & nonzero_memory.unsqueeze(1)
 
         if self.use_transform_layer and hasattr(self, "memory_fusion_layer"):
-            aligned_memorys = self.memory_fusion_layer(
+            aligned_memorys = self.backbone_hidden_states(self.memory_fusion_layer,
                 inputs_embeds=final_memorys,
                 attention_mask=att_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            ).hidden_states[-1]
+            )
         else:
             decoder_hidden_size = self.decoder.config.hidden_size
             if final_memorys.shape[-1] != decoder_hidden_size:
@@ -650,13 +666,11 @@ class COMI(torch.nn.Module):
             outputs = self.decoder.generate(
                 inputs_embeds=decoder_inputs_embeds,
                 attention_mask=decoder_attention_mask,
-                max_new_tokens=20,
+                max_new_tokens=self.model_args.max_new_tokens,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.eos_id,
                 do_sample=False,
-                temperature=0.0,
                 repetition_penalty=1.3,
-                top_p=0.9,
                 use_cache=True
             )
             return outputs

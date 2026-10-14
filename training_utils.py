@@ -1,4 +1,6 @@
 import os
+import json
+from dataclasses import asdict
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -65,8 +67,9 @@ class DataCollatorForDynamicPadding:
         batch_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.pad_token_id)
         batch_query_ids = pad_sequence(query_ids, batch_first=True, padding_value=self.pad_token_id)
         batch_labels = pad_sequence(labels, batch_first=True, padding_value=-100)
-        attention_mask = (batch_input_ids != self.pad_token_id).long()
-        query_attention_mask = (batch_query_ids != self.pad_token_id).long()
+        # Length masks preserve real EOS tokens when EOS doubles as padding.
+        attention_mask = torch.arange(batch_input_ids.shape[1])[None, :] < torch.tensor([len(x) for x in input_ids])[:, None]
+        query_attention_mask = torch.arange(batch_query_ids.shape[1])[None, :] < torch.tensor([len(x) for x in query_ids])[:, None]
 
         return {
             "input_ids": batch_input_ids,
@@ -77,6 +80,11 @@ class DataCollatorForDynamicPadding:
         }
 
 class CustomTrainer(Trainer):
+    def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
+        from modeling_comi import load_checkpoint_file
+        state_dict, _ = load_checkpoint_file(resume_from_checkpoint)
+        (model if model is not None else self.model).load_state_dict(state_dict, strict=True)
+
     def _save(self, output_dir=None, state_dict=None):
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -94,6 +102,11 @@ class CustomTrainer(Trainer):
         safetensors.torch.save_file(deduped, os.path.join(output_dir, "model.safetensors"))
         if hasattr(self.model, "config"):
             self.model.config.save_pretrained(output_dir)
+        model = self.accelerator.unwrap_model(self.model)
+        with open(os.path.join(output_dir, "comi_model_args.json"), "w", encoding="utf-8") as handle:
+            json.dump(asdict(model.model_args), handle, indent=2)
+        model.tokenizer.save_pretrained(output_dir)
+        torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
 
 def train_model(model, train_dataset, eval_dataset, training_args, tokenizer):
     last_checkpoint = None
@@ -111,7 +124,7 @@ def train_model(model, train_dataset, eval_dataset, training_args, tokenizer):
     if local_rank == 0:
         print(training_args)
     training_args.remove_unused_columns = False
-    training_args.safe_serialization = False
+    training_args.prediction_loss_only = True
     data_collator = DataCollatorForDynamicPadding(tokenizer.pad_token_id)
 
     trainer = CustomTrainer(
@@ -132,3 +145,5 @@ def train_model(model, train_dataset, eval_dataset, training_args, tokenizer):
     train_result = trainer.train(resume_from_checkpoint=checkpoint)
     trainer.save_model()
     trainer.log_metrics("train", train_result.metrics)
+    trainer.save_metrics("train", train_result.metrics)
+    trainer.save_state()

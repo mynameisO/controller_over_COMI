@@ -75,17 +75,18 @@ The current implementation uses an encoder-decoder architecture built from the s
 
 ## Environment Setup
 
-The project is designed for NVIDIA GPUs, BF16, and FlashAttention 2. A reference environment matching the current GMSA stack is:
+For the prepared HotpotQA training workflow on RunPod, use [RUNPOD.md](RUNPOD.md)
+and `scripts/runpod_setup.sh`. That workflow pins a separate compatible stack,
+includes data conversion, smoke testing, checkpoint resume, and evaluation.
+
+The prepared workflow uses NVIDIA GPUs, BF16, and PyTorch SDPA. FlashAttention 2
+is optional. On a CUDA 12.9-compatible Linux machine:
 
 ```bash
-conda create -n ram python=3.10 -y
-conda activate ram
-
-pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu118
-pip install \
-  transformers==5.1.0 datasets==4.3.0 peft==0.13.0 \
-  deepspeed==0.18.7 accelerate==1.13.0 safetensors==0.7.0 \
-pip install flash-attn==2.6.3 --no-build-isolation
+python3 -m venv .venv
+source .venv/bin/activate
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+pip install -r requirements-runpod.txt
 ```
 
 ## Data Format
@@ -114,7 +115,8 @@ Run the training script:
 bash train.sh
 ```
 
-`train.sh` is configured as a quick debug launcher: it passes `--debug_data True`.
+`train.sh` uses the full supplied dataset by default. Set `DEBUG_DATA=true` for
+32 training and 10 evaluation examples. Additional CLI arguments are forwarded.
 
 
 ## Inference and Evaluation
@@ -139,11 +141,13 @@ Results are written under `${OUTPUT_DIR}/eval_result/`:
 | `MODEL_NAME` | `Qwen/Qwen3-4B-Instruct-2507` | Hugging Face model path or identifier. |
 | `TRAIN_FILE` | `/path/to/train.jsonl` | Training JSONL. |
 | `TEST_FILE` | `/path/to/test.jsonl` | Evaluation JSONL. |
-| `OUTPUT_DIR` | `./output` | `./output` | Checkpoint and evaluation root. |
+| `OUTPUT_DIR` | `./output` | Checkpoint and evaluation root. |
 | `RESTORE_FROM` | — | Checkpoint directory/file; set this explicitly for normal evaluation. |
 | `MERGE_SIZE` | `16` | Tokens represented by one compressed memory unit. |
-| `SEGMENT_SIZE` | `30000` | Long-context segment size. |
-| `NUM_GPUS` | `2` | Number of `torchrun` workers. |
+| `SEGMENT_SIZE` | `4096` | Long-context segment size. |
+| `NUM_GPUS` | `1` | Number of `torchrun` workers. |
+| `DEBUG_DATA` | `false` | Use a small debugging dataset. |
+| `GRADIENT_ACCUMULATION_STEPS` | `8` | Microbatches per optimizer step. |
 | `MAX_STEPS` | `10000` | Maximum training steps. |
 | `NUM_SAMPLES` | `100` | Evaluation sample count. |
 

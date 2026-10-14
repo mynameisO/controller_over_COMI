@@ -74,14 +74,28 @@ def make_output_paths(output_dir, num_samples, merge_size):
 
 def prepare_model(model_args, training_args, device):
     model_args.train = False
+    if not training_args.restore_from:
+        raise ValueError("Evaluation requires --restore_from")
+    checkpoint_path = Path(training_args.restore_from)
+    checkpoint_dir = checkpoint_path if checkpoint_path.is_dir() else checkpoint_path.parent
+    config_path = checkpoint_dir / "comi_model_args.json"
+    if config_path.exists():
+        saved = json.loads(config_path.read_text(encoding="utf-8"))
+        # Reconstruct training architecture, retaining evaluation controls.
+        for name, value in saved.items():
+            if name not in {"train", "model_name_or_path", "merge_size", "compress_ratio",
+                            "segment_size", "max_new_tokens", "is_random"}:
+                setattr(model_args, name, value)
+    model_args.is_random = False
     lora_config = LoraConfig(**build_lora_config(model_args))
     model = COMI(model_args, training_args, lora_config=lora_config)
     if training_args.restore_from:
         state_dict, ckpt_file = load_checkpoint_file(training_args.restore_from)
         print(f"Loading checkpoint from {ckpt_file}")
-        model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(state_dict, strict=True)
     model.to(device)
     model.eval()
+    model.tokenizer.padding_side = "left"
     return model
 
 
@@ -145,7 +159,7 @@ def merge_rank_outputs(tmp_dir, world_size, final_output_path):
     for rank in range(world_size):
         rank_file = tmp_dir / f"rank_{rank:05d}.jsonl"
         if not rank_file.exists():
-            continue
+            raise FileNotFoundError(f"Missing rank output: {rank_file}")
         with open(rank_file, "r", encoding="utf-8") as f:
             for line in f:
                 merged_rows.append(json.loads(line))

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export HF_ENDPOINT=https://hf-mirror.com
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
@@ -9,15 +7,19 @@ MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-Instruct-2507}"
 TRAIN_FILE="${TRAIN_FILE:-/path/to/train.jsonl}"
 TEST_FILE="${TEST_FILE:-/path/to/test.jsonl}"
 OUTPUT_DIR="${OUTPUT_DIR:-./output}"
-NUM_GPUS="${NUM_GPUS:-2}"
+NUM_GPUS="${NUM_GPUS:-1}"
 MASTER_PORT="${MASTER_PORT:-29502}"
 MERGE_SIZE="${MERGE_SIZE:-16}"
-SEGMENT_SIZE="${SEGMENT_SIZE:-30000}"
+SEGMENT_SIZE="${SEGMENT_SIZE:-4096}"
 MAX_STEPS="${MAX_STEPS:-10000}"
 SAVE_STEPS="${SAVE_STEPS:-2000}"
 EVAL_STEPS="${EVAL_STEPS:-1000}"
 PER_DEVICE_TRAIN_BATCH_SIZE="${PER_DEVICE_TRAIN_BATCH_SIZE:-1}"
 PER_DEVICE_EVAL_BATCH_SIZE="${PER_DEVICE_EVAL_BATCH_SIZE:-1}"
+DEBUG_DATA="${DEBUG_DATA:-false}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-8}"
+[[ -f "$TRAIN_FILE" ]] || { echo "Missing TRAIN_FILE: $TRAIN_FILE" >&2; exit 1; }
+[[ -f "$TEST_FILE" ]] || { echo "Missing TEST_FILE: $TEST_FILE" >&2; exit 1; }
 
 
 torchrun --nproc_per_node="${NUM_GPUS}" --master_port="${MASTER_PORT}" instruction_finetune.py \
@@ -33,6 +35,12 @@ torchrun --nproc_per_node="${NUM_GPUS}" --master_port="${MASTER_PORT}" instructi
   --eval_steps "${EVAL_STEPS}" \
   --per_device_train_batch_size "${PER_DEVICE_TRAIN_BATCH_SIZE}" \
   --per_device_eval_batch_size "${PER_DEVICE_EVAL_BATCH_SIZE}" \
-  --debug_data True
-  # --deepspeed ds_config.json \
+  --debug_data "${DEBUG_DATA}" \
+  --gradient_accumulation_steps "${GRADIENT_ACCUMULATION_STEPS}" \
+  --report_to none \
+  --prediction_loss_only true \
+  --overwrite_output_dir false \
+  --save_total_limit 2 \
+  --ddp_find_unused_parameters true \
+  "$@"
 
