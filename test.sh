@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export HF_ENDPOINT=https://hf-mirror.com
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
@@ -13,7 +11,7 @@ NUM_GPUS="${NUM_GPUS:-1}"
 MASTER_PORT="${MASTER_PORT:-29511}"
 MERGE_SIZE="${MERGE_SIZE:-16}"
 SEGMENT_SIZE="${SEGMENT_SIZE:-10000}"
-PER_DEVICE_EVAL_BATCH_SIZE="${PER_DEVICE_EVAL_BATCH_SIZE:-2}"
+PER_DEVICE_EVAL_BATCH_SIZE="${PER_DEVICE_EVAL_BATCH_SIZE:-1}"
 NUM_SAMPLES="${NUM_SAMPLES:-100}"
 
 
@@ -25,4 +23,6 @@ torchrun --nproc_per_node="${NUM_GPUS}" --master_port="${MASTER_PORT}" ft_infere
   --merge_size "${MERGE_SIZE}" \
   --segment_size "${SEGMENT_SIZE}" \
   --per_device_eval_batch_size "${PER_DEVICE_EVAL_BATCH_SIZE}" \
-  --num_samples "${NUM_SAMPLES}"
+  --num_samples "${NUM_SAMPLES}" \
+  --report_to none \
+  "$@"

@@ -1,2 +1,12 @@
 __pycache__
 *.patch
+.pytest_cache/
+*.py[cod]
+.venv*/
+data/
+output/
+logs/
+.cache/
+artifacts/
+*.zip
+.env
