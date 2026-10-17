@@ -106,6 +106,50 @@ Training and evaluation data are JSONL files with one object per line:
 
 Override `TRAIN_FILE` and `TEST_FILE` when using another location.
 
+### Download HotpotQA
+
+Download the original train and dev distractor JSON from the
+[official HotpotQA source](https://hotpotqa.github.io/) and create COMI JSONL:
+
+```bash
+bash download_hotpotqa.sh
+```
+
+Files are saved relative to this directory:
+
+- `data/hotpotqa/original/hotpot_train_v1.1.json`: unchanged training source.
+- `data/hotpotqa/original/hotpot_dev_distractor_v1.json`: unchanged development source.
+- `data/hotpotqa/train.jsonl`: converted training examples.
+- `data/hotpotqa/test.jsonl`: converted **dev distractor** examples for local evaluation.
+
+The official test split has no public answers, so `test.jsonl` uses labeled dev
+examples. Keep this evaluation split out of controller training. Conversion
+retains every context paragraph, including distractors, in its original order;
+it joins titles and sentences into `input`, uses the question as `prompt`, and
+stores the answer as a one-element `answer` list. Supporting-fact annotations
+are not used to select context.
+
+The downloader uses only Python's standard library. Existing originals are
+reused; selected JSONL files are regenerated on each run. Downloads use temporary
+files and retry failures. Conversion loads one split into RAM at a time; the
+training source is approximately 535 MB and requires additional RAM to parse.
+HotpotQA is distributed under CC BY-SA 4.0; see the source link for attribution.
+
+```bash
+# Optional: smaller JSONL files while keeping the complete originals.
+bash download_hotpotqa.sh --limit 100
+
+# Reconvert downloaded originals without network access.
+bash download_hotpotqa.sh --skip-download
+
+# Use the generated data with the DQN launchers.
+TRAIN_FILE=./data/hotpotqa/train.jsonl RESTORE_FROM=/path/to/comi_checkpoint bash train_dqn.sh
+TEST_FILE=./data/hotpotqa/test.jsonl RESTORE_FROM=/path/to/comi_checkpoint bash test_dqn.sh
+```
+
+Use `--output-dir /path/to/hotpotqa` to choose another destination, or run
+`python download_hotpotqa.py --help` for all options.
+
 ## Training
 
 Run the training script:
@@ -149,6 +193,23 @@ Results are written under `${OUTPUT_DIR}/eval_result/`:
 
 Additional model switches such as `--coarse_grained_on`, `--fine_grained_on`, `--redun_coarse`, `--redun_fine`, LoRA targets, and trainability controls can be passed to `train.sh`.
 
+
+## DQN Smoke Tests
+
+Run from `dqn_prompt_controller/test/`:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+These three offline CPU tests use the hash encoder and a fake COMI generator
+with the real DQN controller. They check training updates and output artifacts,
+checkpoint resume, and inference prediction merging and EM/F1 metrics. Inference
+also verifies that policy weights, replay size, and training counters stay unchanged.
+All generated data and checkpoints use temporary directories.
+
+Only `numpy`, `torch`, and `tqdm` are required. These tests do not download models
+or validate generation with a real COMI checkpoint.
 
 ## BibTeX
 If you find our repo helpful, please consider leaving a star and cite our paper

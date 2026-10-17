@@ -1,0 +1,24 @@
+# COMI fine-tuning/inference and DQN training/inference.
+# Install a CUDA-compatible PyTorch build first when running on NVIDIA GPUs.
+# Offline CPU smoke tests need only numpy, torch, and tqdm.
+# unittest is included with Python; pytest is not required.
+numpy>=1.26
+torch>=2.6,<3
+tqdm>=4.66
+
+# Qwen3 requires Transformers >=4.51. Keep this stack on the 4.x API.
+# https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507
+transformers>=4.51,<5
+peft>=0.17,<0.18
+accelerate>=1.0,<2
+safetensors>=0.4.3
+
+# COMI fine-tuning data loading and its default experiment logging.
+datasets>=3.0,<5
+wandb>=0.17
+
+# Optional: install deepspeed separately when using --deepspeed ds_config.json.
+# Optional: install flash-attn separately with --no-build-isolation after
+# installing PyTorch, when enabling --use_flash_attention_2 True.
+# The DQN MiniLM encoder uses Transformers directly; sentence-transformers
+# is not required.
