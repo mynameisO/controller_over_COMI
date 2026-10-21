@@ -205,7 +205,7 @@ python -m unittest discover -s tests -v
 These three offline CPU tests use the hash encoder and a fake COMI generator
 with the real DQN controller. They check training updates and output artifacts,
 checkpoint resume, and inference prediction merging and EM/F1 metrics. Inference
-also verifies that policy weights, replay size, and training counters stay unchanged.
+also verifies that policy weights and training counters stay unchanged.
 All generated data and checkpoints use temporary directories.
 
 Only `numpy`, `torch`, and `tqdm` are required. These tests do not download models

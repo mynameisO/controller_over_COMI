@@ -123,7 +123,7 @@ def main():
                                training_args.seed)
 
     # ---- controller (standalone) ----
-    # มี checkpoint แล้ว -> โหลดมาใช้/เทรนต่อ (action, weight, epsilon, replay มาครบ)
+    # Resume actions, policy weights, optimizer, and exploration counters.
     # ยังไม่มี -> train: สร้างใหม่โดยใช้ merge_sizes เป็น action, eval: error
     if ckpt.exists():
         controller = PromptController.load(ckpt, device=str(device))
@@ -142,7 +142,7 @@ def main():
     sizes = [int(round(a.compress_rate)) for a in controller.actions]
 
     # ---- train ----
-    # ทุก epoch: สลับลำดับ sample -> DQN เลือก (มีสุ่มตาม epsilon) -> COMI ตอบ -> feedback -> train_step
+    # Each epoch: shuffle -> epsilon-greedy decisions -> COMI -> immediate feedback updates.
     # จบแต่ละ epoch save checkpoint ทับ และเขียนผลรายตัวลง train_epoch{N}.jsonl
     if dqn_args.dqn_mode == 'train':
         history = []

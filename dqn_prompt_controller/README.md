@@ -13,7 +13,7 @@ sample ──> DQN (standalone) ──merge_size──> COMI (บีบ + genera
 1. controller ดู context + query แล้วเลือก `merge_size`
 2. ตั้ง `comi.merge_size` ชั่วคราว (ปิด `is_random`) แล้วเรียก `comi(..., labels=None)` ตามปกติ
 3. นับ memory slot จาก mask ที่ `build_comi_memory` คืนออกมา และนับ token ก่อนบีบจาก attention mask
-4. วัด F1 ของคำตอบ (สูตรเดียวกับ `eval_utils.py`) → reward → replay → `train_step`
+4. วัด F1 ของคำตอบ (สูตรเดียวกับ `eval_utils.py`) → reward → immediate Q-network update
 5. คืนค่า `merge_size` / `is_random` เดิมให้ COMI
 
 ถ้าใน batch มีหลาย sample จะแยกกลุ่มตาม merge_size ก่อนส่งเข้า COMI เพราะ COMI ใช้ merge_size ค่าเดียวทั้ง batch
@@ -23,7 +23,8 @@ sample ──> DQN (standalone) ──merge_size──> COMI (บีบ + genera
 
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `prompt_controller.py` | DQN standalone: encoder, State, DQNAgent, Reward, CLI แบบไฟล์ |
+| `prompt_controller.py` | Standalone encoder, state, reward, and online Q-network |
+| `prompt_controller_cli.py` | Optional JSONL CLI: init / decide / train |
 | `comi_dqn.py` | `DQNOverCOMI` ครอบ COMI (duck-typed ไม่ import COMI) |
 | `run_dqn_over_comi.py` | script train / eval ที่โหลด COMI จริง |
 | `tests/test_controller.py` | test ของ controller |
@@ -50,7 +51,7 @@ python run_dqn_over_comi.py --dqn_mode eval --dqn_checkpoint runs/dqn/dqn_contro
 - action ของ DQN ใช้ค่าจาก `--dqn_merge_sizes` ถ้าไม่ใส่จะใช้ `--merge_sizes` ของ COMI
   ควรใช้ชุดเดียวกับที่ COMI ถูก train มา (COMI default คือ `16,32`) เพราะถ้า COMI ไม่เคยเห็น merge_size ไหน คุณภาพที่ค่านั้นจะตก
 - ช่วง train ใช้ epsilon-greedy โดย `--dqn_epsilon_decay_steps 0` = 70% ของ train_size × epochs (เหมือนต้นฉบับ)
-- ถ้ามี `--dqn_checkpoint` อยู่แล้ว ตอน train จะโหลดมาเทรนต่อ (มีทั้ง replay และ epsilon)
+- ถ้ามี `--dqn_checkpoint` อยู่แล้ว ตอน train จะโหลดมาเทรนต่อ (policy, optimizer, epsilon)
 - รันได้ทีละ 1 process ยังไม่รองรับ torchrun หลาย GPU
 
 ไฟล์ output ใน `--output_dir`
@@ -129,7 +130,7 @@ python prompt_controller.py decide --checkpoint runs/ctl.pt \
 python prompt_controller.py train --checkpoint runs/ctl.pt --feedback runs/feedback.jsonl
 ```
 
-ทำ 2 → 4 วนไปหลายรอบ checkpoint จะเก็บ replay buffer และ `env_steps` ไว้ด้วย epsilon จึงลดต่อเนื่องข้ามรอบ
+ทำ 2 → 4 วนไปหลายรอบ checkpoint จะเก็บ optimizer และ `env_steps` ไว้ด้วย epsilon จึงลดต่อเนื่องข้ามรอบ
 ตอน evaluate ให้รัน `decide` โดยไม่ใส่ `--explore` (เลือกแบบ greedy)
 
 ### รูปแบบไฟล์
@@ -172,13 +173,18 @@ python tests/test_comi_wrapper.py
 - สูตร reward ตรงตัวอย่าง (2048 → 128 token, quality 0.8 → 0.862)
 - learnability: ข้อมูลสังเคราะห์ 3 แบบที่ action ที่ดีที่สุดต่างกัน DQN ต้องชนะ fixed policy ทุกแบบ
   ผลล่าสุด DQN = 0.735 / NONE = 0.550 / MEDIUM = 0.313 / LIGHT = 0.200 / STRONG = −0.037 (ค่าที่ดีที่สุดเป็นไปได้ = 0.738)
-- save/load checkpoint ได้ decision เท่าเดิม และ replay กับ env_steps ไม่หาย
+- save/load checkpoint ได้ decision เท่าเดิม และ optimizer กับ env_steps ไม่หาย
 - CLI ทำงานครบ init → decide → train
 
 ## ข้อควรรู้
 
-- ทุก request มี decision เดียวและจบในตัว (`done=True`, `gamma=0`) ปัญหานี้คือ contextual bandit ที่ใช้โครงสร้าง DQN
-  target network ไม่มีผลกับผลลัพธ์ในการตั้งค่านี้
+- Each request is a contextual bandit step: `feedback()` immediately fits the selected
+  Q-value to its reward with Huber loss. There is no replay buffer, target network,
+  warmup, discount factor, or deferred `train(updates)` method.
+- `feedback(..., train=False)` only calculates reward and savings; it stores nothing.
+  The CLI `train` command updates once per feedback row, so `--updates` is removed.
+- Older checkpoints still load their policy, optimizer, and counters. Their saved
+  replay/target state and obsolete DQN configuration fields are ignored.
 - state คำนวณจาก text ด้วย encoder ของ controller เอง (MiniLM หรือ hash) ไม่ได้ใช้ hidden state ของ COMI
   ค่าจึงไม่เท่ากับ state ใน `dqn_controller.py` ของ branch `omar/controller_dev` ที่คำนวณจาก hidden state ของ encoder ใน COMI
 - `hash` mode เป็นเวกเตอร์สุ่ม ใช้ทดสอบ pipeline เท่านั้น ตอนทดลองจริงต้องใช้ `--encoder-mode hf`

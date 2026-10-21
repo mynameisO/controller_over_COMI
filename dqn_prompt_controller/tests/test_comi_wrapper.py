@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from comi_dqn import DQNOverCOMI, squad_f1  # noqa: E402
 from prompt_controller import DQNConfig, PromptController, actions_from_merge_sizes, set_seed  # noqa: E402
@@ -80,7 +80,7 @@ def main():
     for r in rows:
         assert r['compressed_tokens'] == math.ceil(r['original_tokens'] / r['merge_size'])
     assert sum(b for _, b in comi.calls) == 8 and all(b <= 4 for _, b in comi.calls)
-    assert len(ctl.agent.replay) == 8
+    assert ctl.agent.total_steps == 8
 
     train = make_samples(40)
     for _ in range(12):

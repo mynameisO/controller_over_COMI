@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from prompt_controller import (DEFAULT_ACTIONS, DQNConfig, PromptController, RewardCalculator,  # noqa: E402
                                StateBuilder, TokenEncoder, actions_from_merge_sizes, set_seed)
@@ -127,7 +127,7 @@ def test_learnability_and_checkpoint():
         loaded = PromptController.load(path)
         for _, c, q in test[:10]:
             assert loaded.decide(c, q).action_index == ctl.decide(c, q).action_index
-        assert len(loaded.agent.replay) == len(ctl.agent.replay)
+        assert loaded.agent.total_steps == ctl.agent.total_steps == len(train) * epochs
         assert loaded.agent.env_steps == ctl.agent.env_steps
 
 
@@ -142,6 +142,35 @@ def test_feedback_validation_and_merge_sizes():
     except ValueError:
         pass
     assert len(DEFAULT_ACTIONS) == 4 and other.agent.config.action_dim == 4
+
+
+def test_immediate_feedback_and_metrics_only():
+    set_seed(7)
+    ctl = PromptController(device='cpu')
+    decision = ctl.decide('one two one three', 'one')
+    before = ctl.agent.q_values(decision.state).copy()
+    metrics = ctl.feedback(decision, quality=1.0, compressed_tokens=2, train=False)
+    assert metrics['loss'] is None and ctl.agent.total_steps == 0
+    assert not ctl.agent.optimizer.state
+    np.testing.assert_array_equal(ctl.agent.q_values(decision.state), before)
+
+    result = ctl.feedback(decision, quality=1.0, compressed_tokens=2)
+    assert math.isfinite(result['loss']) and ctl.agent.total_steps == 1
+    after = ctl.agent.q_values(decision.state)
+    action = decision.action_index
+    assert abs(after[action] - result['reward']) < abs(before[action] - result['reward'])
+    assert ctl.agent.env_steps == 0  # Feedback does not advance exploration.
+
+    with tempfile.TemporaryDirectory() as tmp:
+        checkpoint = Path(tmp) / 'ctl.pt'
+        ctl.save(checkpoint)
+        loaded = PromptController.load(checkpoint, device='cpu')
+        expected = ctl.feedback(decision, quality=0.9, compressed_tokens=1)
+        actual = loaded.feedback(decision.to_dict(), quality=0.9, compressed_tokens=1)
+        assert actual == expected
+        np.testing.assert_array_equal(loaded.agent.q_values(decision.state),
+                                      ctl.agent.q_values(decision.state))
+        assert loaded.agent.total_steps == 2
 
 
 def test_cli_round_trip():
@@ -169,7 +198,7 @@ def test_cli_round_trip():
             fb.append({**d, 'quality': q, 'compressed_tokens': math.ceil(d['input_tokens'] * d['retention_ratio'])})
         (tmp / 'fb.jsonl').write_text('\n'.join(json.dumps(r) for r in fb), encoding='utf-8')
         out = json.loads(run('train', '--checkpoint', ck, '--feedback', str(tmp / 'fb.jsonl')))
-        assert out['feedback_rows'] == 40 and out['updates_done'] == 40 and out['replay_size'] == 40
+        assert out['feedback_rows'] == 40 and out['updates_done'] == 40
         ctl = PromptController.load(ck)
         assert ctl.agent.env_steps == 40 and ctl.agent.total_steps == 40
 

@@ -6,7 +6,7 @@ Example (run from this directory):
         --output_dir output/dqn --dqn_merge_sizes 16,32 --dqn_epochs 5
 
 Uses one process on one GPU (or CPU). Existing controller checkpoints are
-loaded with their actions, encoder, optimizer, replay buffer, and step counts.
+loaded with their actions, encoder, optimizer, and step counts.
 """
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def train_dqn(runner, samples, model_args, training_args, dqn_args, checkpoint):
 
 
 def main():
-    # Independent DQN replicas do not synchronize replay or policy updates.
+    # Independent DQN replicas do not synchronize policy updates.
     if int(os.environ.get('WORLD_SIZE', '1')) > 1:
         raise SystemExit('DQN training supports one process; launch with python, not multi-process torchrun')
     pre_parser = argparse.ArgumentParser(add_help=False)

@@ -80,8 +80,7 @@ class DQNPipelineSmokeTest(unittest.TestCase):
         self.training_args = SimpleNamespace(output_dir=str(self.output_dir), restore_from='')
         self.dqn_args = training.DQNTrainingArguments(
             dqn_encoder_mode='hash', dqn_epochs=1, dqn_batch_size=7)
-        # Cross the default replay warmup (32) so smoke tests prove that actual
-        # backpropagation happens, and include a final partial batch.
+        # Exercise multiple COMI batches, including a final partial batch.
         self.samples = [
             {'input': ' '.join(['Paris', 'France'] * (5 + i % 4)),
              'prompt': 'What is the capital of France?',
@@ -109,8 +108,7 @@ class DQNPipelineSmokeTest(unittest.TestCase):
         history = self.train(runner, checkpoint)
         agent = runner.controller.agent
         self.assertEqual(agent.env_steps, 36)
-        self.assertEqual(len(agent.replay), 36)
-        self.assertGreater(agent.total_steps, 0)
+        self.assertEqual(agent.total_steps, 36)
         self.assertTrue(any(not torch.equal(before[k], v) for k, v in agent.policy_net.state_dict().items()))
         self.assertTrue(math.isfinite(history[0]['loss_mean']))
         self.assertEqual(history[0]['n'], 36)
@@ -125,7 +123,6 @@ class DQNPipelineSmokeTest(unittest.TestCase):
             self.assertTrue(math.isfinite(row['reward']))
         loaded = PromptController.load(checkpoint, device='cpu')
         self.assertEqual(loaded.agent.total_steps, agent.total_steps)
-        self.assertEqual(len(loaded.agent.replay), 36)
         self.assertEqual(runner.comi.merge_size, 16)
         self.assertTrue(runner.comi.is_random)
         self.assertNotIn('build_comi_memory', runner.comi.__dict__)
@@ -148,8 +145,7 @@ class DQNPipelineSmokeTest(unittest.TestCase):
         self.train(resumed, checkpoint)
         loaded = PromptController.load(checkpoint, device='cpu')
         self.assertEqual(loaded.agent.env_steps, 72)
-        self.assertEqual(len(loaded.agent.replay), 72)
-        self.assertGreater(loaded.agent.total_steps, previous_steps)
+        self.assertEqual(loaded.agent.total_steps, previous_steps + 36)
 
     def test_inference_loads_checkpoint_writes_predictions_and_preserves_policy(self):
         runner, checkpoint = self.prepare_training()
@@ -159,7 +155,7 @@ class DQNPipelineSmokeTest(unittest.TestCase):
                 self.model_args, self.training_args, inference.DQNArguments(), torch.device('cpu'))
         agent = model.controller.agent
         before = {k: v.clone() for k, v in agent.policy_net.state_dict().items()}
-        counters = (agent.env_steps, agent.total_steps, len(agent.replay))
+        counters = (agent.env_steps, agent.total_steps)
         samples = inference.load_eval_samples(self.output_dir / 'samples.jsonl', 9, False, 7)
         output_path, _, tmp_dir = inference.make_output_paths(self.output_dir, 9, 'dqn')
         # Simulate two inference ranks sequentially on CPU, including uneven
@@ -178,7 +174,7 @@ class DQNPipelineSmokeTest(unittest.TestCase):
             self.assertEqual(row['question'], sample['prompt'])
             self.assertFalse(row['explored'])
             self.assertNotIn('loss', row)
-        self.assertEqual((agent.env_steps, agent.total_steps, len(agent.replay)), counters)
+        self.assertEqual((agent.env_steps, agent.total_steps), counters)
         for name, value in agent.policy_net.state_dict().items():
             self.assertTrue(torch.equal(before[name], value), name)
         expected = runner.run(samples, batch_size=4)

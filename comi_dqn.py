@@ -7,7 +7,7 @@ DQN (prompt_controller.py) เป็น standalone ไม่ import และไ
       -> PromptController.decide()      เลือก merge_size
       -> ตั้ง comi.merge_size ชั่วคราว แล้วเรียก comi(...) ตามปกติ
       -> นับ memory slot ที่ COMI สร้างจริง + วัด F1 ของคำตอบ
-      -> PromptController.feedback()    reward -> replay -> train_step
+      -> PromptController.feedback()    reward -> immediate Q-network update
       -> คืนค่า comi.merge_size / is_random เดิม
 
 COMI ถูกเรียกผ่าน interface ปกติเท่านั้น: tokenizer, merge_size, is_random,
