@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-Instruct-2507}"
-TRAIN_FILE="${TRAIN_FILE:-./data/train.jsonl}"
-RESTORE_FROM="${RESTORE_FROM:-/path/to/comi_checkpoint}"
-OUTPUT_DIR="${OUTPUT_DIR:-./output/dqn}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2-7B-Instruct}"
+TRAIN_FILE="${TRAIN_FILE:-/workspace/controller_over_COMI/data/hotpotqa/train.jsonl}"
+RESTORE_FROM="${RESTORE_FROM:-/workspace/controller_over_COMI/models/comi-qwen2-7b-instruct/model.safetensors}"
+OUTPUT_DIR="${OUTPUT_DIR:-/workspace/controller_over_COMI/output/dqn}"
 DQN_CHECKPOINT="${DQN_CHECKPOINT:-${OUTPUT_DIR}/dqn_controller.pt}"
+# Keep multiple compression choices so the DQN can learn a policy.
 MERGE_SIZES="${MERGE_SIZES:-16,32}"
 SEGMENT_SIZE="${SEGMENT_SIZE:-10000}"
 DQN_EPOCHS="${DQN_EPOCHS:-5}"

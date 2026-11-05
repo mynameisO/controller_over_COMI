@@ -1,12 +1,11 @@
-"""Minimal COMI compression controller: state -> action -> reward -> update.
+"""Compression policy, Q-network, rewards, updates, and controller checkpoints.
 
-Each request is a contextual bandit step. A single Q-network learns directly
-from feedback, with epsilon-greedy exploration and no replay or target network.
-The DQN names are kept for the existing COMI training/inference entry points.
+Each request is a contextual bandit step: train Q(state, action) directly on
+its reward, without replay or a target network. Checkpoint keys and network
+parameter names preserve compatibility with existing controller checkpoints.
 """
 from __future__ import annotations
 
-import hashlib
 import math
 import random
 from dataclasses import asdict, dataclass, fields
@@ -18,19 +17,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-
-FEATURE_VERSION = 'prompt-word-r-minus-d-v1'
-
-STATE_NAMES = ('input_tokens', 'relevance_mean', 'relevance_max',
-               'mig_mean', 'mig_max', 'mig_std', 'redundancy_mean')
-
-
-def set_seed(seed: int = 42):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+from inference_utility import (
+    FEATURE_VERSION, STATE_NAMES, EncoderConfig, StateBuilder, StateFeatures,
+    TokenEncoder, cosine_matrix, set_seed, simple_tokenize,
+)
 
 
 @dataclass(frozen=True)
@@ -98,7 +88,6 @@ class DQNConfig:
     hidden_1: int = 64
     hidden_2: int = 64
 
-
 @dataclass
 class RewardConfig:
     quality_weight: float = 0.55
@@ -109,161 +98,6 @@ class RewardConfig:
     quality_penalty: float = 1.0
 
     cost_source: str = 'tokens'
-
-
-@dataclass
-class EncoderConfig:
-    mode: str = 'hash'
-    model_name: str = 'sentence-transformers/all-MiniLM-L6-v2'
-    hash_dim: int = 128
-
-
-def simple_tokenize(text: str) -> List[str]:
-    return text.split() if text else []
-
-
-def cosine_matrix(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    a = nn.functional.normalize(a, p=2, dim=-1)
-    b = nn.functional.normalize(b, p=2, dim=-1)
-    return a @ b.T
-
-
-class TokenEncoder:
-    """Encode whitespace words with test hashes or a chunked HF encoder."""
-
-    def __init__(self, config: Optional[EncoderConfig] = None, device=None):
-        self.config = config or EncoderConfig()
-        if self.config.mode not in ('hash', 'hf'):
-            raise ValueError('encoder mode must be hash or hf')
-        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.tokenizer = None
-        self.model = None
-        if self.config.mode == 'hf':
-            from transformers import AutoModel, AutoTokenizer
-            name = self.config.model_name
-            self.tokenizer = AutoTokenizer.from_pretrained(name)
-            if not getattr(self.tokenizer, 'is_fast', False):
-                raise ValueError(f'{name}: hf mode needs a fast tokenizer (word_ids())')
-            self.model = AutoModel.from_pretrained(name).to(self.device)
-            self.model.eval()
-
-    def _hash_vector(self, token: str) -> torch.Tensor:
-        seed = int.from_bytes(hashlib.md5(token.lower().encode('utf-8')).digest()[:4], 'little')
-        rng = np.random.default_rng(seed)
-        v = rng.standard_normal(self.config.hash_dim).astype(np.float32)
-        v /= max(float(np.linalg.norm(v)), 1e-8)
-        return torch.tensor(v)
-
-    def _max_chunk_len(self) -> int:
-        limit = getattr(self.model.config, 'max_position_embeddings', 512) or 512
-        tok_limit = getattr(self.tokenizer, 'model_max_length', limit)
-        if not isinstance(tok_limit, int) or tok_limit > 100_000:
-            tok_limit = limit
-        return max(8, min(limit, tok_limit) - 2)
-
-    def encode(self, text: str) -> Tuple[List[str], torch.Tensor]:
-        """Return words and vectors; mean-pool HF subwords back to words."""
-        words = simple_tokenize(text)
-        if self.config.mode == 'hash':
-            if not words:
-                return [], torch.empty((0, self.config.hash_dim))
-            return words, torch.stack([self._hash_vector(t) for t in words])
-
-        hidden = self.model.config.hidden_size
-        if not words:
-            return [], torch.empty((0, hidden))
-        enc = self.tokenizer(words, is_split_into_words=True, add_special_tokens=False, truncation=False)
-        ids: List[int] = enc['input_ids']
-        word_ids = enc.word_ids()
-        max_len = self._max_chunk_len()
-        cls_id, sep_id = self.tokenizer.cls_token_id, self.tokenizer.sep_token_id
-        sub_vecs: List[torch.Tensor] = []
-        for s in range(0, len(ids), max_len):
-            chunk = ids[s:s + max_len]
-            full = ([cls_id] if cls_id is not None else []) + chunk + ([sep_id] if sep_id is not None else [])
-            x = torch.tensor([full], device=self.device)
-            with torch.no_grad():
-                h = self.model(input_ids=x, attention_mask=torch.ones_like(x)).last_hidden_state.squeeze(0)
-            if cls_id is not None:
-                h = h[1:]
-            sub_vecs.append(h[:len(chunk)].detach().cpu())
-        sub = torch.cat(sub_vecs, dim=0) if sub_vecs else torch.empty((0, hidden))
-
-        vecs = torch.zeros((len(words), hidden))
-        counts = torch.zeros(len(words))
-        for i, w in enumerate(word_ids):
-            if w is not None:
-                vecs[w] += sub[i]
-                counts[w] += 1
-        return words, vecs / counts.clamp(min=1).unsqueeze(1)
-
-
-@dataclass
-class StateFeatures:
-    input_tokens: float
-    relevance_mean: float
-    relevance_max: float
-    mig_mean: float
-    mig_max: float
-    mig_std: float
-    redundancy_mean: float
-
-    def to_numpy(self) -> np.ndarray:
-        return np.asarray([getattr(self, n) for n in STATE_NAMES], dtype=np.float32)
-
-
-class StateBuilder:
-    """Build seven features: length, relevance, MIG, and redundancy.
-
-    Relevance is similarity to the mean query vector; redundancy is maximum
-    similarity to another context word, using anchors for long contexts.
-    MIG = relevance - redundancy.
-    """
-
-    def __init__(self, encoder: TokenEncoder, max_pairwise: int = 512, normalize_length_by: float = 4096.0):
-        if max_pairwise < 2 or normalize_length_by <= 0:
-            raise ValueError('invalid max_pairwise or normalize_length_by')
-        self.encoder = encoder
-        self.max_pairwise = max_pairwise
-        self.normalize_length_by = normalize_length_by
-
-    def build(self, context: str, query: str) -> Tuple[StateFeatures, int]:
-        """return (state 7 ตัว, จำนวนคำใน context)"""
-
-        ctoks, cvecs = self.encoder.encode(context)
-        qtoks, qvecs = self.encoder.encode(query)
-        n = len(ctoks)
-        if n == 0:
-            return StateFeatures(0, 0, 0, 0, 0, 0, 0), 0
-
-        q = qvecs.mean(dim=0, keepdim=True) if qtoks else torch.zeros((1, cvecs.shape[-1]))
-
-        relevance = cosine_matrix(cvecs, q).squeeze(1)
-
-        if n == 1:
-            redundancy = torch.zeros_like(relevance)
-        elif n <= self.max_pairwise:
-            sim = cosine_matrix(cvecs, cvecs)
-            sim.fill_diagonal_(-1.0)
-            redundancy = sim.max(dim=1).values
-        else:
-            idx = torch.linspace(0, n - 1, self.max_pairwise).long()
-            sim = cosine_matrix(cvecs, cvecs[idx])
-            sim[idx, torch.arange(len(idx))] = -1.0
-            redundancy = sim.max(dim=1).values
-
-        mig = relevance - redundancy
-
-        state = StateFeatures(
-            input_tokens=min(n / self.normalize_length_by, 2.0),
-            relevance_mean=float(relevance.mean()), relevance_max=float(relevance.max()),
-            mig_mean=float(mig.mean()), mig_max=float(mig.max()),
-            mig_std=float(mig.std(unbiased=False)), redundancy_mean=float(redundancy.mean()),
-        )
-        if not np.isfinite(state.to_numpy()).all():
-            raise ValueError('non-finite state')
-        return state, n
-
 
 class RewardCalculator:
     """Weighted quality and savings, with a penalty below quality_min."""
@@ -301,7 +135,6 @@ class RewardCalculator:
             raise ValueError('compressed_tokens must be >= 0')
         return float(np.clip(1.0 - compressed_tokens / original_tokens, -1, 1))
 
-
 class QNetwork(nn.Module):
     def __init__(self, state_dim=7, action_dim=4, hidden=(64, 64)):
         super().__init__()
@@ -313,7 +146,6 @@ class QNetwork(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-
 
 class DQNAgent:
     """Learn Q(state, action) directly from each request's reward."""
@@ -349,7 +181,6 @@ class DQNAgent:
         self.total_steps += 1
         return loss.item()
 
-
 @dataclass
 class ControllerDecision:
     """COMI compression choice and the metadata needed for feedback."""
@@ -369,7 +200,6 @@ class ControllerDecision:
 
     def to_dict(self) -> Dict:
         return asdict(self)
-
 
 class PromptController:
     """Choose compression, learn from feedback, and save/load checkpoints."""
@@ -479,8 +309,3 @@ class PromptController:
         a.optimizer.load_state_dict(p['optimizer'])
         a.total_steps, a.env_steps = int(p['total_steps']), int(p['env_steps'])
         return ctl
-
-
-if __name__ == '__main__':
-    from prompt_controller_cli import main
-    main()

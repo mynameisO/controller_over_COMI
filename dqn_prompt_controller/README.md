@@ -1,6 +1,6 @@
 # DQN Controller ครอบ COMI
 
-DQN เป็น standalone (`prompt_controller.py` ไม่ import โค้ด COMI) และครอบ COMI จากด้านนอก
+DQN เป็น standalone (`dqn_network.py` ไม่ import โค้ด COMI) และครอบ COMI จากด้านนอก
 โดยไม่แก้ไฟล์ใดๆ ของ COMI
 
 ```
@@ -9,7 +9,7 @@ sample ──> DQN (standalone) ──merge_size──> COMI (บีบ + genera
              └──── reward <── F1, memory slot ที่ COMI สร้างจริง ─────┘
 ```
 
-`comi_dqn.py` เป็นตัวกลางระหว่างสองฝั่ง ต่อ 1 sample จะทำตามลำดับนี้
+`comi_dqn_wrapper.py` เป็นตัวกลางระหว่างสองฝั่ง ต่อ 1 sample จะทำตามลำดับนี้
 1. controller ดู context + query แล้วเลือก `merge_size`
 2. ตั้ง `comi.merge_size` ชั่วคราว (ปิด `is_random`) แล้วเรียก `comi(..., labels=None)` ตามปกติ
 3. นับ memory slot จาก mask ที่ `build_comi_memory` คืนออกมา และนับ token ก่อนบีบจาก attention mask
@@ -23,9 +23,10 @@ sample ──> DQN (standalone) ──merge_size──> COMI (บีบ + genera
 
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `prompt_controller.py` | Standalone encoder, state, reward, and online Q-network |
+| `dqn_network.py` | Controller, reward, online Q-network, and checkpoints |
+| `inference_utility.py` | Encoding, state features, COMI restore, generation, and metrics |
 | `prompt_controller_cli.py` | Optional JSONL CLI: init / decide / train |
-| `comi_dqn.py` | `DQNOverCOMI` ครอบ COMI (duck-typed ไม่ import COMI) |
+| `comi_dqn_wrapper.py` | `DQNOverCOMI` ครอบ COMI (duck-typed ไม่ import COMI) |
 | `run_dqn_over_comi.py` | script train / eval ที่โหลด COMI จริง |
 | `tests/test_controller.py` | test ของ controller |
 | `tests/test_comi_wrapper.py` | test ของ wrapper กับ COMI ปลอม |
@@ -62,8 +63,9 @@ python run_dqn_over_comi.py --dqn_mode eval --dqn_checkpoint runs/dqn/dqn_contro
 ## ใช้ใน Python
 
 ```python
-from comi_dqn import DQNOverCOMI, summarize
-from prompt_controller import PromptController, TokenEncoder, EncoderConfig, actions_from_merge_sizes
+from comi_dqn_wrapper import DQNOverCOMI, summarize
+from dqn_network import PromptController, actions_from_merge_sizes
+from inference_utility import TokenEncoder, EncoderConfig
 
 ctl = PromptController(TokenEncoder(EncoderConfig('hf')), actions_from_merge_sizes('16,32'))
 runner = DQNOverCOMI(comi_model, ctl)                 # comi_model = COMI ที่โหลดแล้ว
@@ -74,7 +76,7 @@ ctl.save('dqn_controller.pt')
 
 ## ใช้ controller อย่างเดียว (ไม่โหลด COMI)
 
-ถ้าต้องการรัน DQN กับ COMI แยกกันคนละขั้น ใช้ CLI ของ `prompt_controller.py` (init / decide / train)
+ถ้าต้องการรัน DQN กับ COMI แยกกันคนละขั้น ใช้ CLI ของ `prompt_controller_cli.py` (init / decide / train)
 ตามหัวข้อข้างล่าง
 
 ## State (7 ค่า)
@@ -117,17 +119,17 @@ token_saving = 1 − compressed_tokens / original_tokens
 pip install -r requirements.txt
 
 # 1) สร้าง controller
-python prompt_controller.py init --checkpoint runs/ctl.pt \
+python prompt_controller_cli.py init --checkpoint runs/ctl.pt \
     --encoder-mode hf --merge-sizes 1,4,16,32 --epsilon-decay-steps 7000
 
 # 2) เลือก action ให้ request  (ช่วงเก็บข้อมูล train ใส่ --explore)
-python prompt_controller.py decide --checkpoint runs/ctl.pt \
+python prompt_controller_cli.py decide --checkpoint runs/ctl.pt \
     --input data/requests.jsonl --output runs/decisions.jsonl --explore
 
 # 3) COMI อ่าน decisions.jsonl บีบตาม merge_size แล้วเขียน feedback.jsonl
 
 # 4) train จาก feedback
-python prompt_controller.py train --checkpoint runs/ctl.pt --feedback runs/feedback.jsonl
+python prompt_controller_cli.py train --checkpoint runs/ctl.pt --feedback runs/feedback.jsonl
 ```
 
 ทำ 2 → 4 วนไปหลายรอบ checkpoint จะเก็บ optimizer และ `env_steps` ไว้ด้วย epsilon จึงลดต่อเนื่องข้ามรอบ

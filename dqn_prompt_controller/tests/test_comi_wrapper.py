@@ -11,8 +11,10 @@ import torch.nn as nn
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from comi_dqn import DQNOverCOMI, squad_f1  # noqa: E402
-from prompt_controller import DQNConfig, PromptController, actions_from_merge_sizes, set_seed  # noqa: E402
+from comi_dqn_wrapper import DQNOverCOMI
+from inference_utility import squad_f1
+from dqn_network import DQNConfig, PromptController, actions_from_merge_sizes
+from inference_utility import set_seed
 
 
 class FakeTokenizer:

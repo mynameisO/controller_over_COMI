@@ -104,8 +104,8 @@ def prepare_model(model_args, training_args, device):
 
 def prepare_dqn_model(model_args, training_args, dqn_args, device):
     """Load a trained controller and COMI, returning their inference wrapper."""
-    from prompt_controller import PromptController
-    from comi_dqn import DQNOverCOMI
+    from dqn_network import PromptController
+    from comi_dqn_wrapper import DQNOverCOMI
 
     if dqn_args.dqn_mode != 'eval':
         raise ValueError('DQN inference requires --dqn_mode eval; use run_dqn_over_comi.py for training')

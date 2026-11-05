@@ -91,9 +91,9 @@ def main():
     from transformers import HfArgumentParser
     from modeling_comi import (COMI, DataArguments, ModelArguments, TrainingArguments,
                                build_lora_config, load_checkpoint_file)
-    from prompt_controller import (DQNConfig, EncoderConfig, PromptController, TokenEncoder,
-                                   actions_from_merge_sizes, set_seed)
-    from comi_dqn import DQNOverCOMI, summarize
+    from dqn_network import DQNConfig, PromptController, actions_from_merge_sizes
+    from inference_utility import EncoderConfig, TokenEncoder, set_seed
+    from comi_dqn_wrapper import DQNOverCOMI, summarize
 
     # parse argument ของ COMI + DQN พร้อมกัน (COMI ชื่อเดิม, DQN ขึ้นต้น dqn_)
     parser = HfArgumentParser((ModelArguments, DataArguments, TrainingArguments, DQNArguments))

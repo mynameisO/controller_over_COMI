@@ -15,8 +15,10 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from prompt_controller import (DEFAULT_ACTIONS, DQNConfig, PromptController, RewardCalculator,  # noqa: E402
-                               StateBuilder, TokenEncoder, actions_from_merge_sizes, set_seed)
+from dqn_network import (
+    DEFAULT_ACTIONS, DQNConfig, PromptController, RewardCalculator, actions_from_merge_sizes,
+)
+from inference_utility import StateBuilder, TokenEncoder, set_seed
 
 VOCAB = [f'w{i}' for i in range(5000)]
 
@@ -183,7 +185,7 @@ def test_cli_round_trip():
             c, q = make_request(kind, rng)
             reqs.append({'request_id': f'r{i}', 'context': c, 'query': q, 'kind': kind})
         (tmp / 'req.jsonl').write_text('\n'.join(json.dumps(r) for r in reqs), encoding='utf-8')
-        run = lambda *a: subprocess.run([sys.executable, str(ROOT / 'prompt_controller.py'), *a],
+        run = lambda *a: subprocess.run([sys.executable, str(ROOT / 'prompt_controller_cli.py'), *a],
                                         check=True, capture_output=True, text=True).stdout
         ck = str(tmp / 'ctl.pt')
         run('init', '--checkpoint', ck)

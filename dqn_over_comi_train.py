@@ -54,10 +54,9 @@ def prepare_model(model_args, training_args, device):
 
 def prepare_dqn_model(model_args, training_args, dqn_args, device, train_size):
     """Resume a controller or create one with the reference action/decay setup."""
-    from prompt_controller import (
-        DQNConfig, EncoderConfig, PromptController, TokenEncoder, actions_from_merge_sizes,
-    )
-    from comi_dqn import DQNOverCOMI
+    from dqn_network import DQNConfig, PromptController, actions_from_merge_sizes
+    from inference_utility import EncoderConfig, TokenEncoder
+    from comi_dqn_wrapper import DQNOverCOMI
 
     checkpoint = (Path(dqn_args.dqn_checkpoint) if dqn_args.dqn_checkpoint
                   else Path(training_args.output_dir) / 'dqn_controller.pt')
@@ -80,7 +79,7 @@ def prepare_dqn_model(model_args, training_args, dqn_args, device, train_size):
 
 def train_dqn(runner, samples, model_args, training_args, dqn_args, checkpoint):
     """Generate COMI responses, feed rewards to DQN, and save each epoch."""
-    from comi_dqn import summarize
+    from comi_dqn_wrapper import summarize
 
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +130,7 @@ def main():
     import torch
     from transformers import HfArgumentParser
     from modeling_comi import DataArguments, ModelArguments, TrainingArguments
-    from prompt_controller import set_seed
+    from inference_utility import set_seed
 
     parser = HfArgumentParser((ModelArguments, DataArguments, TrainingArguments, DQNTrainingArguments))
     model_args, data_args, training_args, dqn_args = parser.parse_args_into_dataclasses()

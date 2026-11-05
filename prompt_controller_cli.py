@@ -7,10 +7,10 @@ from typing import Dict, Iterable, Tuple
 
 import numpy as np
 
-from prompt_controller import (
-    DEFAULT_ACTIONS, ActionSpec, DQNConfig, EncoderConfig, PromptController,
-    RewardConfig, TokenEncoder, actions_from_merge_sizes, parse_actions, set_seed,
+from dqn_network import (
+    DEFAULT_ACTIONS, ActionSpec, DQNConfig, PromptController, RewardConfig, actions_from_merge_sizes, parse_actions,
 )
+from inference_utility import EncoderConfig, TokenEncoder, set_seed
 
 
 def read_jsonl(path) -> Iterable[Dict]:

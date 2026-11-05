@@ -22,7 +22,8 @@ sys.path.insert(0, str(ROOT))
 
 import dqn_over_comi_infer as inference
 import dqn_over_comi_train as training
-from prompt_controller import PromptController, set_seed
+from dqn_network import PromptController
+from inference_utility import set_seed
 
 
 class FakeTokenizer:
