@@ -7,7 +7,7 @@ cd "${SCRIPT_DIR}"
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2-7B-Instruct}"
 TRAIN_FILE="${TRAIN_FILE:-/workspace/datasets/train.jsonl}"
-TEST_FILE="${TEST_FILE:-/workspace/datatsets/test.jsonl}"
+TEST_FILE="${TEST_FILE:-/workspace/datatsets/eval.jsonl}"
 OUTPUT_DIR="${OUTPUT_DIR:-./output}"
 NUM_GPUS="${NUM_GPUS:-1}"
 # MASTER_PORT="${MASTER_PORT:-29502}"
