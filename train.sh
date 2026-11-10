@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export HF_ENDPOINT=https://hf-mirror.com
+export HF_ENDPOINT=https://huggingface.co
+unset HF_HUB_OFFLINE TRANSFORMERS_OFFLINE
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
