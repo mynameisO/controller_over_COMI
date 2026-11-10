@@ -16,6 +16,7 @@ safetensors>=0.4.3
 # COMI fine-tuning data loading and its default experiment logging.
 datasets>=3.0,<5
 wandb>=0.17
+hf_transfer
 
 # Optional: install deepspeed separately when using --deepspeed ds_config.json.
 # Optional: install flash-attn separately with --no-build-isolation after
